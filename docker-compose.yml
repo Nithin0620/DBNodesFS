@@ -1,0 +1,94 @@
+name: dbnodesfs
+
+x-app-env: &app-env
+  NODE_ENV: development
+  LOG_LEVEL: debug
+  MONGO_URI: mongodb://mongo:27017/dbnodesfs
+  REDIS_URL: redis://redis:6379
+  QDRANT_URL: http://qdrant:6333
+  EMBEDDER_URL: http://embedder:8000
+
+services:
+  mongo:
+    image: mongo:7
+    ports: ["27017:27017"]
+    volumes: [mongo-data:/data/db]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes: [redis-data:/data]
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports: ["6333:6333"]
+    volumes: [qdrant-data:/qdrant/storage]
+
+  storage-node-1:
+    build: { context: ., dockerfile: Dockerfile.node, args: { APP: storage-node } }
+    environment:
+      <<: *app-env
+      APP: storage-node
+      STORAGE_NODE_ID: node-1
+      STORAGE_NODE_PORT: 5001
+      STORAGE_NODE_DATA_DIR: /data
+    ports: ["5001:5001"]
+    volumes: [node1-data:/data]
+
+  storage-node-2:
+    build: { context: ., dockerfile: Dockerfile.node, args: { APP: storage-node } }
+    environment:
+      <<: *app-env
+      APP: storage-node
+      STORAGE_NODE_ID: node-2
+      STORAGE_NODE_PORT: 5001
+      STORAGE_NODE_DATA_DIR: /data
+    ports: ["5002:5001"]
+    volumes: [node2-data:/data]
+
+  storage-node-3:
+    build: { context: ., dockerfile: Dockerfile.node, args: { APP: storage-node } }
+    environment:
+      <<: *app-env
+      APP: storage-node
+      STORAGE_NODE_ID: node-3
+      STORAGE_NODE_PORT: 5001
+      STORAGE_NODE_DATA_DIR: /data
+    ports: ["5003:5001"]
+    volumes: [node3-data:/data]
+
+  coordinator:
+    build: { context: ., dockerfile: Dockerfile.node, args: { APP: coordinator } }
+    environment:
+      <<: *app-env
+      APP: coordinator
+      COORDINATOR_PORT: 4000
+    ports: ["4000:4000"]
+    depends_on: [mongo, redis]
+
+  worker:
+    build: { context: ., dockerfile: Dockerfile.node, args: { APP: worker } }
+    environment:
+      <<: *app-env
+      APP: worker
+    depends_on: [redis, embedder]
+
+  embedder:
+    build: ./apps/embedder
+    ports: ["8000:8000"]
+    environment:
+      EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
+      SPARSE_MODEL: Qdrant/bm25
+
+  web:
+    build: { context: ., dockerfile: Dockerfile.web }
+    ports: ["5173:80"]
+    depends_on: [coordinator]
+
+volumes:
+  mongo-data:
+  redis-data:
+  qdrant-data:
+  node1-data:
+  node2-data:
+  node3-data:

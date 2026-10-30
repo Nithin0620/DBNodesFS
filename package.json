@@ -1,0 +1,18 @@
+{
+  "name": "dbnodesfs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AI-powered distributed file storage and retrieval platform",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter @dbnodesfs/shared build && pnpm --filter \"./apps/*\" build",
+    "dev": "pnpm --filter @dbnodesfs/shared build && pnpm -r --parallel dev",
+    "clean": "rm -rf packages/*/dist apps/*/dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,22 @@
+FROM node:22-alpine AS build
+
+RUN corepack enable
+WORKDIR /app
+
+COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages ./packages
+COPY apps ./apps
+
+ARG APP
+RUN pnpm install --no-frozen-lockfile \
+  && pnpm --filter @dbnodesfs/shared build \
+  && pnpm --filter @dbnodesfs/${APP} build
+
+FROM node:22-alpine
+
+WORKDIR /app
+COPY --from=build /app ./
+
+ENV APP=coordinator
+
+CMD ["sh", "-c", "node apps/$APP/dist/index.js"]
