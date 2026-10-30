@@ -86,6 +86,15 @@ export const heartbeatSchema = z.object({
   chunkCount: z.number().int().nonnegative(),
 });
 
+export const settingsUpdateSchema = z.object({
+  replicationFactor: z.number().int().min(1),
+  chunkSizeBytes: z.number().int().min(1024).max(8 * 1024 * 1024),
+});
+
+export const nodeStatusUpdateSchema = z.object({
+  status: z.enum(["healthy", "draining"]),
+});
+
 export const uploadMetaSchema = z.object({
   filename: z.string().min(1).max(512),
   mime: z.string().min(1).max(255),
@@ -107,6 +116,8 @@ export const askRequestSchema = searchRequestSchema.extend({
 export const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 
 export type HeartbeatInput = z.infer<typeof heartbeatSchema>;
+export type SettingsUpdateInput = z.infer<typeof settingsUpdateSchema>;
+export type NodeStatusUpdateInput = z.infer<typeof nodeStatusUpdateSchema>;
 export type UploadMetaInput = z.infer<typeof uploadMetaSchema>;
 export type SearchRequestInput = z.infer<typeof searchRequestSchema>;
 export type AskRequestInput = z.infer<typeof askRequestSchema>;

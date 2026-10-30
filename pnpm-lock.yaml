@@ -17,9 +17,15 @@ importers:
       '@dbnodesfs/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      bullmq:
+        specifier: ^5.21.2
+        version: 5.81.5
       express:
         specifier: ^4.21.1
         version: 4.22.3
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.11.1
       mongoose:
         specifier: ^8.7.2
         version: 8.24.7
@@ -95,6 +101,9 @@ importers:
       ioredis:
         specifier: ^5.4.1
         version: 5.11.1
+      mongoose:
+        specifier: ^8.7.2
+        version: 8.24.7
     devDependencies:
       '@types/node':
         specifier: ^22.7.5

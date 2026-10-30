@@ -9,11 +9,9 @@ export async function api<T>(path: string, method = "GET", body?: unknown): Prom
   const token = localStorage.getItem("token");
   if (token) headers.authorization = `Bearer ${token}`;
 
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const init: RequestInit = { method, headers };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const res = await fetch(`/api${path}`, init);
 
   const payload = await res.json().catch(() => null);
   if (!res.ok) {

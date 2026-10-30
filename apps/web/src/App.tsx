@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import Admin from "./Admin";
 import { api, type Health } from "./api";
 
-type Tab = "dashboard" | "files" | "search";
+type Tab = "dashboard" | "files" | "search" | "admin";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -45,7 +46,7 @@ export default function App() {
       <h1 style={{ fontSize: 22 }}>DBNodesFS</h1>
 
       <nav style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-        {(["dashboard", "files", "search"] as Tab[]).map((item) => (
+        {(["dashboard", "files", "search", "admin"] as Tab[]).map((item) => (
           <button key={item} onClick={() => setTab(item)} disabled={tab === item}>
             {item}
           </button>
@@ -79,6 +80,8 @@ export default function App() {
           <button onClick={() => void search()}>Search</button>
         </div>
       )}
+
+      {tab === "admin" && <Admin />}
 
       {status && <pre style={{ marginTop: 24, whiteSpace: "pre-wrap" }}>{status}</pre>}
     </main>
