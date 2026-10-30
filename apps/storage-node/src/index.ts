@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import express from "express";
 import { sha256Schema } from "@dbnodesfs/shared";
 import { createHttpLogger, createLogger } from "@dbnodesfs/shared/logger";
 
 const nodeId = process.env.STORAGE_NODE_ID ?? "node-1";
+const port = Number(process.env.STORAGE_NODE_PORT ?? 5001);
 const dataDir = process.env.STORAGE_NODE_DATA_DIR ?? "./data";
+const coordinatorUrl = process.env.COORDINATOR_URL ?? "http://localhost:4000";
+const advertiseUrl = process.env.STORAGE_NODE_ADVERTISE_URL ?? `http://localhost:${port}`;
 const log = createLogger(`storage-node:${nodeId}`);
 const app = express();
 
@@ -57,6 +60,29 @@ async function stats(): Promise<{ chunkCount: number; usedBytes: number }> {
   return { chunkCount, usedBytes };
 }
 
+async function sendHeartbeat(): Promise<void> {
+  try {
+    await mkdir(dataDir, { recursive: true });
+    const disk = await statfs(dataDir);
+    const body = {
+      nodeId,
+      advertiseUrl,
+      ...(await stats()),
+      freeBytes: disk.bavail * disk.bsize,
+    };
+    const res = await fetch(`${coordinatorUrl}/internal/heartbeat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      log.warn({ status: res.status }, "heartbeat rejected");
+    }
+  } catch (err) {
+    log.warn({ err }, "heartbeat failed");
+  }
+}
+
 app.put("/internal/chunks/:hash", express.raw({ type: "application/octet-stream", limit: "8mb" }), async (req, res) => {
   const hash = sha256Schema.safeParse(req.params.hash);
   if (!hash.success) {
@@ -64,8 +90,8 @@ app.put("/internal/chunks/:hash", express.raw({ type: "application/octet-stream"
   }
   const body = req.body as Buffer;
   try {
-    const existed = await writeChunk(hash.data, body);
-    res.status(existed ? 201 : 200).json({ hash: hash.data, size: body.length, nodeId, existed });
+    const created = await writeChunk(hash.data, body);
+    res.status(created ? 201 : 200).json({ hash: hash.data, size: body.length, nodeId, created });
   } catch (err) {
     const e = err as { status?: number; code?: string; message: string };
     res.status(e.status ?? 500).json({ error: { code: e.code ?? "IO_ERROR", message: e.message } });
@@ -109,5 +135,10 @@ app.get("/internal/stats", async (_req, res) => {
   res.json({ nodeId, ...(await stats()) });
 });
 
-const port = Number(process.env.STORAGE_NODE_PORT ?? 5001);
-app.listen(port, () => log.info({ port, dataDir }, "storage node listening"));
+const heartbeatMs = Number(process.env.NODE_HEARTBEAT_INTERVAL_MS ?? 5000);
+
+app.listen(port, () => {
+  log.info({ port, dataDir, coordinatorUrl }, "storage node listening");
+  void sendHeartbeat();
+  setInterval(() => void sendHeartbeat(), heartbeatMs);
+});

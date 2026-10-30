@@ -7,6 +7,7 @@ x-app-env: &app-env
   REDIS_URL: redis://redis:6379
   QDRANT_URL: http://qdrant:6333
   EMBEDDER_URL: http://embedder:8000
+  COORDINATOR_URL: http://coordinator:4000
 
 services:
   mongo:
@@ -31,6 +32,7 @@ services:
       APP: storage-node
       STORAGE_NODE_ID: node-1
       STORAGE_NODE_PORT: 5001
+      STORAGE_NODE_ADVERTISE_URL: http://storage-node-1:5001
       STORAGE_NODE_DATA_DIR: /data
     ports: ["5001:5001"]
     volumes: [node1-data:/data]
@@ -42,6 +44,7 @@ services:
       APP: storage-node
       STORAGE_NODE_ID: node-2
       STORAGE_NODE_PORT: 5001
+      STORAGE_NODE_ADVERTISE_URL: http://storage-node-2:5001
       STORAGE_NODE_DATA_DIR: /data
     ports: ["5002:5001"]
     volumes: [node2-data:/data]
@@ -53,6 +56,7 @@ services:
       APP: storage-node
       STORAGE_NODE_ID: node-3
       STORAGE_NODE_PORT: 5001
+      STORAGE_NODE_ADVERTISE_URL: http://storage-node-3:5001
       STORAGE_NODE_DATA_DIR: /data
     ports: ["5003:5001"]
     volumes: [node3-data:/data]

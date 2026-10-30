@@ -1,10 +1,10 @@
 import { Worker } from "bullmq";
-import IORedis from "ioredis";
+import { Redis } from "ioredis";
 import { QUEUE_GC, QUEUE_INDEX, QUEUE_REPAIR } from "@dbnodesfs/shared";
 import { createLogger } from "@dbnodesfs/shared/logger";
 
 const log = createLogger("worker");
-const connection = new IORedis(process.env.REDIS_URL ?? "redis://localhost:6379", {
+const connection = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: null,
 });
 

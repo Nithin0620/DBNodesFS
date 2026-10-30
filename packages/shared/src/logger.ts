@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import pino, { type Logger } from "pino";
-import pinoHttp from "pino-http";
+import { pinoHttp } from "pino-http";
 
 export function createLogger(service: string): Logger {
   return pino({
