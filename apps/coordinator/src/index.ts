@@ -204,9 +204,11 @@ app.post(
         nodeIds: targets.map((node) => node.nodeId),
       });
     }
+    const auth = req.headers.authorization ?? "";
+    const ownerId = auth.startsWith("Bearer ") ? auth.slice(7) : "anonymous";
     const file = await File.create({
       workspaceId: parsed.data.workspaceId,
-      ownerId: "anonymous",
+      ownerId,
       filename: parsed.data.filename,
       mime: parsed.data.mime,
       size: parsed.data.size,
@@ -220,8 +222,11 @@ app.post(
   },
 );
 
-app.get("/files", async (_req, res) => {
-  const files = await File.find({ status: { $ne: "deleted" } }).sort({ createdAt: -1 });
+app.get("/files", async (req, res) => {
+  const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
+  const filter: Record<string, unknown> = { status: { $ne: "deleted" } };
+  if (workspaceId) filter.workspaceId = workspaceId;
+  const files = await File.find(filter).sort({ createdAt: -1 });
   res.json({ files });
 });
 
@@ -326,12 +331,18 @@ app.post("/search", async (req, res) => {
     with_payload: true,
   });
 
-  const hits = result.points.map((pt) => ({
+  const rawHits = result.points.map((pt) => ({
     fileId: pt.payload?.["fileId"] as string,
     chunkIndex: pt.payload?.["chunkIndex"] as number,
     text: pt.payload?.["text"] as string,
     score: pt.score,
   }));
+
+  const fileIds = [...new Set(rawHits.map((h) => h.fileId))];
+  const fileDocs = await File.find({ _id: { $in: fileIds } }, "filename").lean();
+  const nameMap = new Map(fileDocs.map((f) => [String(f._id), f.filename as string]));
+
+  const hits = rawHits.map((h) => ({ ...h, filename: nameMap.get(h.fileId) ?? h.fileId }));
 
   res.json({ hits });
 });
@@ -388,18 +399,23 @@ app.post("/ask", async (req, res) => {
     return res.json({ answer: "No relevant content found.", citations: [] });
   }
 
-  const hits = result.points.map((pt) => ({
+  const rawHits = result.points.map((pt) => ({
     fileId: pt.payload?.["fileId"] as string,
     chunkIndex: pt.payload?.["chunkIndex"] as number,
     text: pt.payload?.["text"] as string,
   }));
 
-  const context = hits.map((h, i) => `[${i + 1}] ${h.text}`).join("\n\n");
+  const askFileIds = [...new Set(rawHits.map((h) => h.fileId))];
+  const askFileDocs = await File.find({ _id: { $in: askFileIds } }, "filename").lean();
+  const askNameMap = new Map(askFileDocs.map((f) => [String(f._id), f.filename as string]));
+
+  const context = rawHits.map((h, i) => `[${i + 1}] (${askNameMap.get(h.fileId) ?? h.fileId}) ${h.text}`).join("\n\n");
   const answer = `Based on the indexed content:\n\n${context}`;
 
-  const citations = hits.map((h, i) => ({
+  const citations = rawHits.map((h, i) => ({
     index: i + 1,
     fileId: h.fileId,
+    filename: askNameMap.get(h.fileId) ?? h.fileId,
     chunkIndex: h.chunkIndex,
   }));
 

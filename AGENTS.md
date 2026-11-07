@@ -50,9 +50,9 @@ This is a learner project. It is not production-grade.
 
 ## Current status
 
-Completed phases: **1 through 15**.
+Completed phases: **1 through 19**.
 
-Next phase: **16 — Ask + citations**.
+Next phase: **20 — Polish + hardening** (or as directed by the user).
 
 Mongo is running locally as `dbnodesfs-mongo-1` on `localhost:27017`.
 
@@ -75,10 +75,10 @@ Mongo is running locally as `dbnodesfs-mongo-1` on `localhost:27017`.
 | 13 | Embeddings | Worker calls embedder dense + sparse | Done |
 | 14 | Qdrant upsert | Create collection; upsert vectors + payload | Done |
 | 15 | Hybrid search | Dense + sparse prefetch with RRF | Done |
-| 16 | Ask + citations | Build cited answers from top chunks | Pending |
-| 17 | Auth + ACL | Minimal token auth; workspace pre-filter in search | Pending |
-| 18 | Repair + chaos | Heartbeat timeout, mark down, re-replicate, chaos demo | Pending |
-| 19 | User dashboard | Wire upload, file list, search/ask into the web app | Pending |
+| 16 | Ask + citations | Build cited answers from top chunks | Done |
+| 17 | Auth + ACL | Minimal token auth; workspace pre-filter in search | Done |
+| 18 | Repair + chaos | Heartbeat timeout, mark down, re-replicate, chaos demo | Done |
+| 19 | User dashboard | Wire upload, file list, search/ask into the web app | Done |
 
 ## Implemented endpoints
 

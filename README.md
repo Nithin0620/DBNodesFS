@@ -30,22 +30,78 @@ docs/              architecture notes
 
 ## Run
 
-This repo is a skeleton: dependencies are not installed and git is not
-initialized.
+### Everything in one command (local dev)
 
 ```bash
-pnpm install
-pnpm build
-docker compose up --build
+pnpm install      # first time only
+pnpm dev:all
 ```
 
-- Web: http://localhost:5173
-- Coordinator: http://localhost:4000/health
-- Storage nodes: http://localhost:5001 .. 5003
-- Embedder: http://localhost:8000/health
+`scripts/dev.sh` starts:
 
-For development without Docker, run Mongo/Redis/Qdrant locally, then
-`pnpm dev`.
+- Mongo, Redis, Qdrant (reuses anything already listening on 27017/6379/6333)
+- the embedder on :8000 (creates `.venv` and installs deps on first run)
+- three storage nodes on :5001, :5002, :5003
+- the coordinator on :4000, the worker, and the web app on :5173
+
+| Service | URL |
+| --- | --- |
+| Web | http://localhost:5173 |
+| Coordinator | http://localhost:4000/health |
+| Storage nodes | http://localhost:5001/health .. http://localhost:5003/health |
+| Embedder | http://localhost:8000/health |
+
+Press `Ctrl-C` to stop all app processes. Mongo/Redis/Qdrant keep running.
+
+### Stop everything
+
+```bash
+# 1. stop the app processes started by pnpm dev:all: press Ctrl-C in that terminal
+
+# 2. stop the infra containers
+pnpm infra:down
+```
+
+### Reset / clear all containers and data
+
+```bash
+# remove containers and their named volumes (Mongo, Qdrant, node data)
+docker compose down -v --remove-orphans
+
+# remove local chunk data written by the storage nodes
+rm -rf data
+
+# optional: also remove locally built images
+docker compose down -v --rmi local --remove-orphans
+```
+
+`down -v` deletes the Mongo, Redis, Qdrant, and storage-node Docker volumes, so
+all persisted data is lost.
+
+### Run services individually
+
+```bash
+pnpm infra:up                              # mongo + redis + qdrant
+pnpm --filter @dbnodesfs/coordinator dev   # :4000
+pnpm --filter @dbnodesfs/worker dev
+pnpm --filter @dbnodesfs/web dev           # :5173
+pnpm --filter @dbnodesfs/storage-node dev  # :5001
+
+# extra storage node
+STORAGE_NODE_ID=node-2 STORAGE_NODE_PORT=5002 \
+STORAGE_NODE_ADVERTISE_URL=http://localhost:5002 \
+STORAGE_NODE_DATA_DIR=./data/node-2 \
+pnpm --filter @dbnodesfs/storage-node dev
+
+# embedder
+.venv/bin/python -m uvicorn app:app --app-dir apps/embedder --port 8000
+```
+
+### Everything in Docker
+
+```bash
+docker compose up --build
+```
 
 ## Status
 

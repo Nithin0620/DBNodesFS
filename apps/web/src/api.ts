@@ -15,6 +15,7 @@ export interface FileRecord {
 
 export interface SearchHit {
   fileId: string;
+  filename: string;
   chunkIndex: number;
   text: string;
   score: number;
@@ -23,6 +24,7 @@ export interface SearchHit {
 export interface Citation {
   index: number;
   fileId: string;
+  filename: string;
   chunkIndex: number;
 }
 
@@ -42,6 +44,10 @@ export async function api<T>(path: string, method = "GET", body?: unknown): Prom
     throw new Error(message);
   }
   return payload as T;
+}
+
+export async function listFiles(workspaceId: string): Promise<{ files: FileRecord[] }> {
+  return api<{ files: FileRecord[] }>(`/files?workspaceId=${encodeURIComponent(workspaceId)}`);
 }
 
 export async function rawUpload(file: File, workspaceId: string): Promise<FileRecord> {
