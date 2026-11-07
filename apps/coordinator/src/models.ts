@@ -49,6 +49,18 @@ const settingsSchema = new Schema({
   updatedAt: { type: Date, default: Date.now },
 });
 
+const textChunkSchema = new Schema({
+  fileId: { type: Schema.Types.ObjectId, required: true, index: true },
+  workspaceId: { type: String, required: true, index: true },
+  chunkIndex: { type: Number, required: true },
+  text: { type: String, required: true },
+  denseVector: { type: [Number], default: undefined },
+  sparseIndices: { type: [Number], default: undefined },
+  sparseValues: { type: [Number], default: undefined },
+  createdAt: { type: Date, default: Date.now },
+});
+
 export const File = mongoose.model("File", fileSchema);
 export const StorageNode = mongoose.model("StorageNode", storageNodeSchema);
 export const Settings = mongoose.model("Settings", settingsSchema);
+export const TextChunk = mongoose.model("TextChunk", textChunkSchema);

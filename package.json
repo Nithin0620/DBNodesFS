@@ -10,6 +10,9 @@
   "scripts": {
     "build": "pnpm --filter @dbnodesfs/shared build && pnpm --filter \"./apps/*\" build",
     "dev": "pnpm --filter @dbnodesfs/shared build && pnpm -r --parallel dev",
+    "dev:all": "bash scripts/dev.sh",
+    "infra:up": "docker compose up -d mongo redis qdrant",
+    "infra:down": "docker compose down",
     "clean": "rm -rf packages/*/dist apps/*/dist"
   },
   "devDependencies": {

@@ -67,6 +67,7 @@ services:
       <<: *app-env
       APP: coordinator
       COORDINATOR_PORT: 4000
+      API_TOKEN: dev-token
     ports: ["4000:4000"]
     depends_on: [mongo, redis]
 

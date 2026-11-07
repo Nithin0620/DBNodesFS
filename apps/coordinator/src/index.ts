@@ -1,12 +1,17 @@
 import { createHash } from "node:crypto";
+import { QdrantClient } from "@qdrant/js-client-rest";
 import { Queue } from "bullmq";
 import express from "express";
 import { Redis } from "ioredis";
 import mongoose from "mongoose";
 import {
+  DEFAULT_TOP_K,
+  askRequestSchema,
   heartbeatSchema,
   nodeStatusUpdateSchema,
   QUEUE_GC,
+  QUEUE_INDEX,
+  QUEUE_REPAIR,
   searchRequestSchema,
   settingsUpdateSchema,
   uploadMetaSchema,
@@ -21,9 +26,30 @@ const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
   maxRetriesPerRequest: null,
 });
 const gcQueue = new Queue(QUEUE_GC, { connection: redis });
+const indexQueue = new Queue(QUEUE_INDEX, { connection: redis });
+const repairQueue = new Queue(QUEUE_REPAIR, { connection: redis });
+const qdrant = new QdrantClient({ url: process.env.QDRANT_URL ?? "http://localhost:6333" });
+const EMBEDDER_URL = process.env.EMBEDDER_URL ?? "http://localhost:8000";
+const COLLECTION = "chunks";
 
 app.use(createHttpLogger(log));
 app.use(express.json({ limit: "1mb" }));
+
+const API_TOKEN = process.env.API_TOKEN ?? "";
+
+app.use((req, res, next) => {
+  if (req.path === "/health" || req.path.startsWith("/internal/")) {
+    return next();
+  }
+  if (!API_TOKEN) {
+    return next();
+  }
+  const auth = req.headers.authorization ?? "";
+  if (auth !== `Bearer ${API_TOKEN}`) {
+    return res.status(401).json({ error: { code: "UNAUTHORIZED", message: "invalid or missing token" } });
+  }
+  next();
+});
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", mongo: mongoose.connection.readyState === 1 });
@@ -189,6 +215,7 @@ app.post(
       indexStatus: "pending",
       chunks: storedChunks,
     });
+    await indexQueue.add("index-file", { fileId: file.id, workspaceId: file.workspaceId });
     res.status(201).json({ file });
   },
 );
@@ -251,12 +278,132 @@ app.delete("/files/:id", async (req, res) => {
   res.json({ file });
 });
 
-app.post("/search", (req, res) => {
+app.post("/search", async (req, res) => {
   const parsed = searchRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: { code: "INVALID_INPUT", message: parsed.error.message } });
   }
-  res.status(501).json({ error: { code: "NOT_IMPLEMENTED", message: "search not implemented" } });
+  const { query, workspaceId, topK = DEFAULT_TOP_K, fileIds } = parsed.data;
+
+  const [denseRes, sparseRes] = await Promise.all([
+    fetch(`${EMBEDDER_URL}/embed/dense`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ texts: [query] }),
+    }),
+    fetch(`${EMBEDDER_URL}/embed/sparse`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ texts: [query] }),
+    }),
+  ]);
+
+  if (!denseRes.ok || !sparseRes.ok) {
+    return res.status(502).json({ error: { code: "EMBEDDER_ERROR", message: "embedder unavailable" } });
+  }
+
+  const { vectors: denseVectors } = (await denseRes.json()) as { vectors: number[][] };
+  const { vectors: sparseVectors } = (await sparseRes.json()) as {
+    vectors: { indices: number[]; values: number[] }[];
+  };
+  const denseVec = denseVectors[0]!;
+  const sparseVec = sparseVectors[0]!;
+
+  const filter: Record<string, unknown> = {
+    must: [{ key: "workspaceId", match: { value: workspaceId } }],
+  };
+  if (fileIds && fileIds.length > 0) {
+    (filter.must as unknown[]).push({ key: "fileId", match: { any: fileIds } });
+  }
+
+  const result = await qdrant.query(COLLECTION, {
+    prefetch: [
+      { query: { indices: sparseVec.indices, values: sparseVec.values }, using: "sparse", limit: topK * 3, filter },
+      { query: denseVec, using: "dense", limit: topK * 3, filter },
+    ],
+    query: { rrf: {} },
+    limit: topK,
+    with_payload: true,
+  });
+
+  const hits = result.points.map((pt) => ({
+    fileId: pt.payload?.["fileId"] as string,
+    chunkIndex: pt.payload?.["chunkIndex"] as number,
+    text: pt.payload?.["text"] as string,
+    score: pt.score,
+  }));
+
+  res.json({ hits });
+});
+
+app.post("/ask", async (req, res) => {
+  const parsed = askRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: { code: "INVALID_INPUT", message: parsed.error.message } });
+  }
+  const { question, workspaceId, topK = DEFAULT_TOP_K, fileIds } = parsed.data;
+
+  const [denseRes, sparseRes] = await Promise.all([
+    fetch(`${EMBEDDER_URL}/embed/dense`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ texts: [question] }),
+    }),
+    fetch(`${EMBEDDER_URL}/embed/sparse`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ texts: [question] }),
+    }),
+  ]);
+
+  if (!denseRes.ok || !sparseRes.ok) {
+    return res.status(502).json({ error: { code: "EMBEDDER_ERROR", message: "embedder unavailable" } });
+  }
+
+  const { vectors: denseVectors } = (await denseRes.json()) as { vectors: number[][] };
+  const { vectors: sparseVectors } = (await sparseRes.json()) as {
+    vectors: { indices: number[]; values: number[] }[];
+  };
+  const denseVec = denseVectors[0]!;
+  const sparseVec = sparseVectors[0]!;
+
+  const filter: Record<string, unknown> = {
+    must: [{ key: "workspaceId", match: { value: workspaceId } }],
+  };
+  if (fileIds && fileIds.length > 0) {
+    (filter.must as unknown[]).push({ key: "fileId", match: { any: fileIds } });
+  }
+
+  const result = await qdrant.query(COLLECTION, {
+    prefetch: [
+      { query: { indices: sparseVec.indices, values: sparseVec.values }, using: "sparse", limit: topK * 3, filter },
+      { query: denseVec, using: "dense", limit: topK * 3, filter },
+    ],
+    query: { rrf: {} },
+    limit: topK,
+    with_payload: true,
+  });
+
+  if (result.points.length === 0) {
+    return res.json({ answer: "No relevant content found.", citations: [] });
+  }
+
+  const hits = result.points.map((pt) => ({
+    fileId: pt.payload?.["fileId"] as string,
+    chunkIndex: pt.payload?.["chunkIndex"] as number,
+    text: pt.payload?.["text"] as string,
+  }));
+
+  const context = hits.map((h, i) => `[${i + 1}] ${h.text}`).join("\n\n");
+  const answer = `Based on the indexed content:\n\n${context}`;
+
+  const citations = hits.map((h, i) => ({
+    index: i + 1,
+    fileId: h.fileId,
+    chunkIndex: h.chunkIndex,
+  }));
+
+  res.json({ answer, citations });
 });
 
 app.use((_req, res) => {
@@ -268,6 +415,17 @@ async function main() {
   await Promise.all([File.init(), StorageNode.init(), Settings.init()]);
   const port = Number(process.env.COORDINATOR_PORT ?? 4000);
   app.listen(port, () => log.info({ port }, "coordinator listening"));
+
+  const HEARTBEAT_TIMEOUT_MS = 30_000;
+  setInterval(async () => {
+    const cutoff = new Date(Date.now() - HEARTBEAT_TIMEOUT_MS);
+    const stale = await StorageNode.find({ status: "healthy", lastHeartbeatAt: { $lt: cutoff } });
+    for (const node of stale) {
+      await StorageNode.updateOne({ nodeId: node.nodeId }, { $set: { status: "down" } });
+      await repairQueue.add("repair-node", { nodeId: node.nodeId });
+      log.warn({ nodeId: node.nodeId }, "node marked down, repair enqueued");
+    }
+  }, 10_000);
 }
 
 main().catch((err) => {

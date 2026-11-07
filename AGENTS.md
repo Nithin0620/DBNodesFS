@@ -50,9 +50,9 @@ This is a learner project. It is not production-grade.
 
 ## Current status
 
-Completed phases: **1 through 10**.
+Completed phases: **1 through 15**.
 
-Next phase: **11 — delete and garbage collection**.
+Next phase: **16 — Ask + citations**.
 
 Mongo is running locally as `dbnodesfs-mongo-1` on `localhost:27017`.
 
@@ -70,11 +70,11 @@ Mongo is running locally as `dbnodesfs-mongo-1` on `localhost:27017`.
 | 8 | Upload chunking | Raw upload, split, SHA-256, manifest preview | Done |
 | 9 | Replication + manifest | PUT chunks to chosen nodes, save committed `File` | Done |
 | 10 | List + download | `GET /files` from Mongo; download with hash verification | Done |
-| 11 | Delete + GC | Mark deleted, enqueue GC, remove unreferenced chunks | Pending |
-| 12 | Index + extract | Enqueue index job; extract text for allowlisted types | Pending |
-| 13 | Embeddings | Worker calls embedder dense + sparse | Pending |
-| 14 | Qdrant upsert | Create collection; upsert vectors + payload | Pending |
-| 15 | Hybrid search | Dense + sparse prefetch with RRF | Pending |
+| 11 | Delete + GC | Mark deleted, enqueue GC, remove unreferenced chunks | Done |
+| 12 | Index + extract | Enqueue index job; extract text for allowlisted types | Done |
+| 13 | Embeddings | Worker calls embedder dense + sparse | Done |
+| 14 | Qdrant upsert | Create collection; upsert vectors + payload | Done |
+| 15 | Hybrid search | Dense + sparse prefetch with RRF | Done |
 | 16 | Ask + citations | Build cited answers from top chunks | Pending |
 | 17 | Auth + ACL | Minimal token auth; workspace pre-filter in search | Pending |
 | 18 | Repair + chaos | Heartbeat timeout, mark down, re-replicate, chaos demo | Pending |
@@ -122,7 +122,7 @@ Web:
 | `packages/shared/src/index.ts` | Types, zod schemas, constants, queue names |
 | `packages/shared/src/logger.ts` | pino logger + HTTP logger |
 | `apps/coordinator/src/index.ts` | Express API, routes, upload/replication |
-| `apps/coordinator/src/models.ts` | Mongoose `File`, `StorageNode`, `Settings` |
+| `apps/coordinator/src/models.ts` | Mongoose `File`, `StorageNode`, `Settings`, `TextChunk` |
 | `apps/coordinator/src/placement.ts` | `chooseNodes()` round-robin helper |
 | `apps/storage-node/src/index.ts` | Content-addressed chunk store + heartbeat |
 | `apps/worker/src/index.ts` | BullMQ worker stubs |
