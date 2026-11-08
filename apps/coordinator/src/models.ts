@@ -1,4 +1,4 @@
-import { DEFAULT_CHUNK_SIZE_BYTES, DEFAULT_REPLICATION_FACTOR } from "@dbnodesfs/shared";
+import { DEFAULT_CHUNK_SIZE_BYTES, DEFAULT_DESIRED_NODE_COUNT, DEFAULT_REPLICATION_FACTOR } from "@dbnodesfs/shared";
 import mongoose, { Schema } from "mongoose";
 
 const chunkSchema = new Schema(
@@ -46,6 +46,7 @@ const settingsSchema = new Schema({
   key: { type: String, required: true, unique: true, default: "cluster" },
   replicationFactor: { type: Number, default: DEFAULT_REPLICATION_FACTOR },
   chunkSizeBytes: { type: Number, default: DEFAULT_CHUNK_SIZE_BYTES },
+  desiredNodeCount: { type: Number, default: DEFAULT_DESIRED_NODE_COUNT },
   updatedAt: { type: Date, default: Date.now },
 });
 

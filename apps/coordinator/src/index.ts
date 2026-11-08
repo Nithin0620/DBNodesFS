@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { Queue } from "bullmq";
 import express from "express";
@@ -31,6 +34,10 @@ const repairQueue = new Queue(QUEUE_REPAIR, { connection: redis });
 const qdrant = new QdrantClient({ url: process.env.QDRANT_URL ?? "http://localhost:6333" });
 const EMBEDDER_URL = process.env.EMBEDDER_URL ?? "http://localhost:8000";
 const COLLECTION = "chunks";
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+
+import type { ChildProcess } from "node:child_process";
+const spawnedNodes = new Map<string, ChildProcess>();
 
 app.use(createHttpLogger(log));
 app.use(express.json({ limit: "1mb" }));
@@ -61,11 +68,15 @@ app.post("/internal/heartbeat", async (req, res) => {
     return res.status(400).json({ error: { code: "INVALID_INPUT", message: parsed.error.message } });
   }
   const { nodeId, ...metrics } = parsed.data;
+  const isSpawned = spawnedNodes.has(nodeId);
   await StorageNode.findOneAndUpdate(
     { nodeId },
-    { $set: { ...metrics, lastHeartbeatAt: new Date() } },
-    { upsert: true, setDefaultsOnInsert: true },
+    { $set: { ...metrics, lastHeartbeatAt: new Date() }, $setOnInsert: { status: "healthy" } },
+    { upsert: true },
   );
+  if (isSpawned) {
+    await StorageNode.updateOne({ nodeId, status: "down" }, { $set: { status: "healthy" } });
+  }
   res.json({ status: "ok" });
 });
 
@@ -95,10 +106,11 @@ async function getSettings() {
   return existing ?? Settings.create({ key: "cluster" });
 }
 
-function settingsView(settings: { replicationFactor: number; chunkSizeBytes: number; updatedAt: Date }) {
+function settingsView(settings: { replicationFactor: number; chunkSizeBytes: number; desiredNodeCount: number; updatedAt: Date }) {
   return {
     replicationFactor: settings.replicationFactor,
     chunkSizeBytes: settings.chunkSizeBytes,
+    desiredNodeCount: settings.desiredNodeCount,
     updatedAt: settings.updatedAt,
   };
 }
@@ -138,6 +150,14 @@ app.put("/admin/settings", async (req, res) => {
       },
     });
   }
+  if (parsed.data.desiredNodeCount < parsed.data.replicationFactor) {
+    return res.status(400).json({
+      error: {
+        code: "INVALID_SETTINGS",
+        message: `desiredNodeCount ${parsed.data.desiredNodeCount} cannot be less than replicationFactor ${parsed.data.replicationFactor}`,
+      },
+    });
+  }
   const settings = await Settings.findOneAndUpdate(
     { key: "cluster" },
     { $set: { ...parsed.data, updatedAt: new Date() } },
@@ -146,6 +166,7 @@ app.put("/admin/settings", async (req, res) => {
   if (!settings) {
     return res.status(500).json({ error: { code: "IO_ERROR", message: "settings not saved" } });
   }
+  void reconcileNodes();
   res.json({ settings: settingsView(settings) });
 });
 
@@ -338,8 +359,8 @@ app.post("/search", async (req, res) => {
     score: pt.score,
   }));
 
-  const fileIds = [...new Set(rawHits.map((h) => h.fileId))];
-  const fileDocs = await File.find({ _id: { $in: fileIds } }, "filename").lean();
+  const hitFileIds = [...new Set(rawHits.map((h) => h.fileId))];
+  const fileDocs = await File.find({ _id: { $in: hitFileIds } }, "filename").lean();
   const nameMap = new Map(fileDocs.map((f) => [String(f._id), f.filename as string]));
 
   const hits = rawHits.map((h) => ({ ...h, filename: nameMap.get(h.fileId) ?? h.fileId }));
@@ -422,15 +443,72 @@ app.post("/ask", async (req, res) => {
   res.json({ answer, citations });
 });
 
+app.get("/admin/nodes/spawned", (_req, res) => {
+  res.json({ spawned: [...spawnedNodes.keys()] });
+});
+
 app.use((_req, res) => {
   res.status(404).json({ error: { code: "NOT_FOUND", message: "route not found" } });
 });
+
+function spawnNode(nodeId: string, port: number) {
+  const env = {
+    ...process.env,
+    STORAGE_NODE_ID: nodeId,
+    STORAGE_NODE_PORT: String(port),
+    STORAGE_NODE_ADVERTISE_URL: `http://localhost:${port}`,
+    STORAGE_NODE_DATA_DIR: `${ROOT_DIR}/data/${nodeId}`,
+  };
+  const child = spawn(
+    "pnpm",
+    ["--filter", "@dbnodesfs/storage-node", "dev"],
+    { cwd: ROOT_DIR, env, stdio: "inherit", detached: false },
+  );
+  child.on("exit", () => spawnedNodes.delete(nodeId));
+  spawnedNodes.set(nodeId, child);
+  log.info({ nodeId, port }, "spawned storage node");
+}
+
+function killNode(nodeId: string) {
+  const child = spawnedNodes.get(nodeId);
+  if (!child) return;
+  child.kill("SIGTERM");
+  spawnedNodes.delete(nodeId);
+  log.info({ nodeId }, "killed storage node");
+}
+
+async function reconcileNodes() {
+  const settings = await getSettings();
+  const desired = settings.desiredNodeCount;
+
+  const activeNodes = await StorageNode.find({ status: { $in: ["healthy", "draining"] } }).sort({ nodeId: 1 });
+  const healthyNodes = activeNodes.filter((n) => n.status === "healthy");
+  const current = healthyNodes.length;
+
+  if (current < desired) {
+    for (let i = current + 1; i <= desired; i++) {
+      const nodeId = `node-${i}`;
+      if (!spawnedNodes.has(nodeId)) spawnNode(nodeId, 5000 + i);
+    }
+  } else if (current > desired) {
+    const excess = healthyNodes.slice(desired);
+    for (const node of excess) {
+      const already = activeNodes.some((n) => n.nodeId === node.nodeId && n.status === "draining");
+      if (already) continue;
+      await StorageNode.updateOne({ nodeId: node.nodeId }, { $set: { status: "draining" } });
+      await repairQueue.add("repair-node", { nodeId: node.nodeId });
+      log.info({ nodeId: node.nodeId }, "node set to draining, repair enqueued");
+    }
+  }
+}
 
 async function main() {
   await mongoose.connect(process.env.MONGO_URI ?? "mongodb://localhost:27017/dbnodesfs");
   await Promise.all([File.init(), StorageNode.init(), Settings.init()]);
   const port = Number(process.env.COORDINATOR_PORT ?? 4000);
   app.listen(port, () => log.info({ port }, "coordinator listening"));
+
+  setTimeout(() => void reconcileNodes(), 15_000);
 
   const HEARTBEAT_TIMEOUT_MS = 30_000;
   setInterval(async () => {
@@ -441,6 +519,29 @@ async function main() {
       await repairQueue.add("repair-node", { nodeId: node.nodeId });
       log.warn({ nodeId: node.nodeId }, "node marked down, repair enqueued");
     }
+
+    const drainingNodes = await StorageNode.find({ status: "draining" });
+    if (drainingNodes.length > 0) {
+      const settings = await getSettings();
+      const healthyIds = new Set(
+        (await StorageNode.find({ status: "healthy" }, "nodeId")).map((n) => n.nodeId),
+      );
+      for (const node of drainingNodes) {
+        const affectedFiles = await File.find({ status: "committed", "chunks.nodeIds": node.nodeId }, "chunks");
+        const canDrain = affectedFiles.every((file) =>
+          file.chunks
+            .filter((c) => c.nodeIds.includes(node.nodeId))
+            .every((c) => c.nodeIds.filter((id) => id !== node.nodeId && healthyIds.has(id)).length >= settings.replicationFactor),
+        );
+        if (canDrain) {
+          if (spawnedNodes.has(node.nodeId)) killNode(node.nodeId);
+          await StorageNode.updateOne({ nodeId: node.nodeId }, { $set: { status: "down" } });
+          log.info({ nodeId: node.nodeId }, "drain complete, node marked down");
+        }
+      }
+    }
+
+    await reconcileNodes();
   }, 10_000);
 }
 

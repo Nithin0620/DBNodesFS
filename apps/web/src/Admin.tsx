@@ -14,6 +14,7 @@ interface StorageNode {
 interface Settings {
   replicationFactor: number;
   chunkSizeBytes: number;
+  desiredNodeCount: number;
   updatedAt: string;
 }
 
@@ -125,6 +126,7 @@ export default function Admin() {
   const [settings, setSettings]               = useState<Settings | null>(null);
   const [replicationFactor, setReplicationFactor] = useState("3");
   const [chunkSizeBytes, setChunkSizeBytes]   = useState("4194304");
+  const [desiredNodeCount, setDesiredNodeCount] = useState("3");
   const [status, setStatus]                   = useState("");
 
   async function loadNodes() {
@@ -138,10 +140,11 @@ export default function Admin() {
 
   async function loadSettings() {
     try {
-      const data = await api<Settings>("/admin/settings");
-      setSettings(data);
-      setReplicationFactor(String(data.replicationFactor));
-      setChunkSizeBytes(String(data.chunkSizeBytes));
+      const data = await api<{ settings: Settings }>("/admin/settings");
+      setSettings(data.settings);
+      setReplicationFactor(String(data.settings.replicationFactor));
+      setChunkSizeBytes(String(data.settings.chunkSizeBytes));
+      setDesiredNodeCount(String(data.settings.desiredNodeCount));
     } catch (err) {
       setStatus(`settings error: ${err}`);
     }
@@ -167,11 +170,12 @@ export default function Admin() {
   async function saveSettings(e: FormEvent) {
     e.preventDefault();
     try {
-      const updated = await api<Settings>("/admin/settings", "PUT", {
+      const updated = await api<{ settings: Settings }>("/admin/settings", "PUT", {
         replicationFactor: Number(replicationFactor),
         chunkSizeBytes: Number(chunkSizeBytes),
+        desiredNodeCount: Number(desiredNodeCount),
       });
-      setSettings(updated);
+      setSettings(updated.settings);
       setStatus("settings updated successfully");
     } catch (err) {
       setStatus(`save error: ${err}`);
@@ -318,6 +322,20 @@ export default function Admin() {
                   style={inputStyle}
                   step={1024}
                   min={1024}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 13, color: t.secondary, marginBottom: 6, fontWeight: 500 }}>
+                  Desired Nodes
+                </label>
+                <input
+                  type="number"
+                  value={desiredNodeCount}
+                  onChange={(e) => setDesiredNodeCount(e.target.value)}
+                  style={inputStyle}
+                  min={1}
+                  max={20}
                 />
               </div>
 

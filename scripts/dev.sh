@@ -67,17 +67,18 @@ fi
 start "embedder :8000" \
   .venv/bin/python -m uvicorn app:app --app-dir apps/embedder --host 0.0.0.0 --port 8000
 
-start "storage-node node-1 :5001" \
-  env STORAGE_NODE_ID=node-1 STORAGE_NODE_PORT=5001 STORAGE_NODE_ADVERTISE_URL=http://localhost:5001 STORAGE_NODE_DATA_DIR="$ROOT/data/node-1" \
-  pnpm --filter @dbnodesfs/storage-node dev
+NODE_COUNT=3
+[ -f "$ROOT/.env" ] && NODE_COUNT=$(grep -E '^NODE_COUNT=' "$ROOT/.env" | cut -d= -f2)
+NODE_COUNT="${NODE_COUNT:-3}"
 
-start "storage-node node-2 :5002" \
-  env STORAGE_NODE_ID=node-2 STORAGE_NODE_PORT=5002 STORAGE_NODE_ADVERTISE_URL=http://localhost:5002 STORAGE_NODE_DATA_DIR="$ROOT/data/node-2" \
-  pnpm --filter @dbnodesfs/storage-node dev
-
-start "storage-node node-3 :5003" \
-  env STORAGE_NODE_ID=node-3 STORAGE_NODE_PORT=5003 STORAGE_NODE_ADVERTISE_URL=http://localhost:5003 STORAGE_NODE_DATA_DIR="$ROOT/data/node-3" \
-  pnpm --filter @dbnodesfs/storage-node dev
+for i in $(seq 1 "$NODE_COUNT"); do
+  PORT=$((5000 + i))
+  start "storage-node node-$i :$PORT" \
+    env STORAGE_NODE_ID="node-$i" STORAGE_NODE_PORT="$PORT" \
+        STORAGE_NODE_ADVERTISE_URL="http://localhost:$PORT" \
+        STORAGE_NODE_DATA_DIR="$ROOT/data/node-$i" \
+    pnpm --filter @dbnodesfs/storage-node dev
+done
 
 start "coordinator :4000" pnpm --filter @dbnodesfs/coordinator dev
 start "worker" pnpm --filter @dbnodesfs/worker dev
@@ -87,7 +88,7 @@ echo
 echo "  web         http://localhost:5173"
 echo "  coordinator http://localhost:4000/health"
 echo "  embedder    http://localhost:8000/health"
-echo "  nodes       http://localhost:5001/health .. http://localhost:5003/health"
+echo "  nodes       http://localhost:5001/health .. http://localhost:$((5000 + NODE_COUNT))/health  ($NODE_COUNT nodes)"
 echo
 echo "press ctrl-c to stop (mongo/redis/qdrant stay running)"
 echo

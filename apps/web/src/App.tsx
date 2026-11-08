@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FallingLeaves } from "falling-leaves/react";
 import Admin from "./Admin";
 import { api, listFiles, rawUpload, type Citation, type FileRecord, type Health, type SearchHit } from "./api";
 
@@ -99,7 +100,8 @@ export default function App() {
   }, []);
 
   return (
-    <div style={{ minHeight: "100vh", background: t.neutral, color: t.primary }}>
+    <div style={{ minHeight: "100vh", background: t.neutral, color: t.primary, position: "relative" }}>
+      <FallingLeaves fullScreen style={{ pointerEvents: "none", zIndex: 1 }} />
       <header style={{
         background: t.surface,
         borderBottom: `1px solid ${t.border}`,

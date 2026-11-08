@@ -62,6 +62,7 @@ export interface IndexJobData {
 
 export const DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_REPLICATION_FACTOR = 3;
+export const DEFAULT_DESIRED_NODE_COUNT = 3;
 export const DEFAULT_TOP_K = 8;
 
 export const QUEUE_INDEX = "index";
@@ -71,11 +72,11 @@ export const QUEUE_GC = "gc";
 export const QDRANT_VECTORS = { dense: "dense", sparse: "sparse" } as const;
 
 export const TEXT_MIME_ALLOWLIST = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
   "text/markdown",
   "application/json",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ] as const;
 
 export const heartbeatSchema = z.object({
@@ -89,6 +90,7 @@ export const heartbeatSchema = z.object({
 export const settingsUpdateSchema = z.object({
   replicationFactor: z.number().int().min(1),
   chunkSizeBytes: z.number().int().min(1024).max(8 * 1024 * 1024),
+  desiredNodeCount: z.number().int().min(1).max(20),
 });
 
 export const nodeStatusUpdateSchema = z.object({

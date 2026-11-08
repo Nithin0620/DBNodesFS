@@ -4,6 +4,9 @@ import { Redis } from "ioredis";
 import mongoose, { Schema } from "mongoose";
 import { IndexJobData, QUEUE_GC, QUEUE_INDEX, QUEUE_REPAIR, TEXT_MIME_ALLOWLIST } from "@dbnodesfs/shared";
 import { createLogger } from "@dbnodesfs/shared/logger";
+import mammoth from "mammoth";
+// @ts-expect-error pdf-parse lacks export map for internal lib entry
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
 const log = createLogger("worker");
 const connection = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
@@ -149,7 +152,26 @@ new Worker<IndexJobData>(
       parts.push(Buffer.from(await res.arrayBuffer()));
     }
 
-    const fullText = Buffer.concat(parts).toString("utf8");
+    const rawBuffer = Buffer.concat(parts);
+    let fullText = "";
+    try {
+      if (file.mime === "application/pdf") {
+        const parsed = await pdfParse(rawBuffer);
+        fullText = parsed.text ?? "";
+      } else if (
+        file.mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ) {
+        const parsed = await mammoth.extractRawText({ buffer: rawBuffer });
+        fullText = parsed.value ?? "";
+      } else {
+        fullText = rawBuffer.toString("utf8");
+      }
+    } catch (err) {
+      await files.updateOne({ _id: oid }, { $set: { indexStatus: "failed" } });
+      log.error({ fileId, err }, "index failed: text extraction error");
+      return { status: "failed" };
+    }
+
     const textChunks = splitText(fullText.trim());
 
     await files.updateOne({ _id: oid }, { $set: { indexStatus: "indexing" } });
@@ -223,10 +245,11 @@ new Worker<{ nodeId: string }>(
       .findOne<{ replicationFactor: number }>({ key: "cluster" });
     const replicationFactor = settings?.replicationFactor ?? 3;
 
-    const healthyNodes = await nodes
-      .find({ status: "healthy" })
-      .toArray();
-    const healthy = new Map(healthyNodes.map((n) => [n.nodeId, n.advertiseUrl]));
+    const allNodes = await nodes.find({ status: { $in: ["healthy", "draining"] } }).toArray();
+    const healthy = new Map(
+      allNodes.filter((n) => n.status === "healthy").map((n) => [n.nodeId, n.advertiseUrl]),
+    );
+    const reachable = new Map(allNodes.map((n) => [n.nodeId, n.advertiseUrl]));
 
     const affectedFiles = await files
       .find({ status: "committed", "chunks.nodeIds": nodeId })
@@ -242,10 +265,13 @@ new Worker<{ nodeId: string }>(
         if (liveIds.length >= replicationFactor) continue;
 
         const need = replicationFactor - liveIds.length;
-        const candidates = healthyNodes.filter((n) => !chunk.nodeIds.includes(n.nodeId));
+        const candidates = allNodes.filter(
+          (n) => n.status === "healthy" && !chunk.nodeIds.includes(n.nodeId),
+        );
         if (candidates.length === 0) continue;
 
-        const sourceUrl = healthy.get(liveIds[0]!);
+        const sourceId = chunk.nodeIds.find((id) => reachable.has(id));
+        const sourceUrl = sourceId ? reachable.get(sourceId) : undefined;
         if (!sourceUrl) continue;
 
         const dataRes = await fetch(`${sourceUrl}/internal/chunks/${chunk.sha256}`);
