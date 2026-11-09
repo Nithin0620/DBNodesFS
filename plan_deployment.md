@@ -1,9 +1,6 @@
-# DBNodesFS — End-to-End Deployment Plan
+# DBNodesFS — End-to-End Deployment Plan (GitHub Actions + Cloudflare Pages)
 
-This document details the complete end-to-end deployment architecture, prerequisites, pipeline configuration, and maintenance operations for DBNodesFS across:
-1. **Cloudflare Pages** (Frontend SPA connected directly to Git).
-2. **Oracle Cloud Infrastructure (OCI) ARM64 Server** (Backend Docker Compose cluster).
-3. **Jenkins Server** (Automating backend updates on OCI via SSH).
+This document details the complete deployment architecture and automated CI/CD pipeline using **GitHub Actions** and **Cloudflare Pages**.
 
 ---
 
@@ -11,15 +8,14 @@ This document details the complete end-to-end deployment architecture, prerequis
 
 ```mermaid
 flowchart TD
-    GitHub["GitHub Repository\n(main branch)"]
-    CF["Cloudflare Pages\n(Auto-deploys frontend on git push)"]
-    Jenkins["Jenkins Server\n(Deploys backend on git push)"]
-    OCI["OCI Server (80.225.207.232)\nDocker Compose Backend"]
-    User["End User / Browser"]
+    Dev["Developer"] -->|git push origin main| GitHub["GitHub Repository\n(Nithin0620/DBNodesFS)"]
 
-    GitHub -->|Webhook: Git Push| CF
-    GitHub -->|Webhook: Git Push| Jenkins
-    Jenkins -->|SSH Deploy| OCI
+    subgraph CI_CD ["Fully Automated CI/CD (Zero Server Cost)"]
+        GitHub -->|Webhook| CF["Cloudflare Pages\n(Auto-builds & hosts frontend SPA)"]
+        GitHub -->|GitHub Actions Workflow| GHA["GitHub Actions Runner\n(.github/workflows/deploy.yml)"]
+    end
+
+    GHA -->|SSH Deploy via Secret OCI_SSH_KEY| OCI["OCI Server (80.225.207.232)\n12GB RAM ARM64"]
 
     subgraph OCI Backend Cluster
         Coord["Coordinator (:4000)"]
@@ -33,147 +29,108 @@ flowchart TD
         Qdrant[("Qdrant Vector DB")]
     end
 
+    OCI --- Coord
     Coord --> Mongo & Redis & N1 & N2 & N3
     Worker --> Redis & Embedder & Qdrant
 
-    User -->|HTTPS| CF
+    User["End User / Browser"] -->|HTTPS| CF
     CF -->|API Requests: https://api.dbnodesfs.ssh.net.in| Coord
 ```
 
-### Separation of Responsibilities:
-- **Cloudflare Pages**: Connected directly to GitHub. Whenever you push to `main`, Cloudflare automatically builds and deploys the static frontend. Jenkins does not need to build or upload frontend assets.
-- **Jenkins**: Triggers on `main` push, SSHs into the OCI server, pulls latest code, and runs `docker compose up -d --build --scale web=0`.
-- **OCI Server**: Runs the 7 backend services (`coordinator`, `worker`, `embedder`, 3 `storage-nodes`, `mongo`, `redis`, `qdrant`). The `web` container is scaled to 0 since Cloudflare Pages serves the UI.
+### Why this architecture is vastly superior:
+1. **Zero Jenkins overhead**: No JVM memory hogs, no 1GB VM disk thrashing/freezing.
+2. **100% Free Managed CI/CD**: GitHub Actions provides 2,000 free runner minutes/month.
+3. **Dual Trigger on Git Push**:
+   - Cloudflare Pages builds and deploys the static Vite frontend.
+   - GitHub Actions connects over SSH to OCI and runs `docker compose up -d --build --scale web=0`.
 
 ---
 
-## 2. Server & Environment Setup
+## 2. One-Time Setup Steps
 
-### 2.1 OCI Server Preparation (`80.225.207.232`)
-1. **Add Swap (Recommended for builds)**:
-   ```bash
-   sudo fallocate -l 4G /swapfile
-   sudo chmod 600 /swapfile
-   sudo mkswap /swapfile
-   sudo swapon /swapfile
-   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-   ```
+### Step 1: Generate an SSH Key Pair for GitHub Actions
+On your local computer (or terminal), generate a dedicated SSH key pair:
+```bash
+ssh-keygen -t ed25519 -C "github-actions-dbnodesfs" -f /tmp/gha_oci_key -N ""
+```
+This generates two files:
+- `/tmp/gha_oci_key` (Private key)
+- `/tmp/gha_oci_key.pub` (Public key)
 
-2. **Verify Port Availability**:
-   Ensure ports required by DBNodesFS do not conflict with existing services:
-   ```bash
-   sudo ss -tulpn | grep -E ':(4000|27017|6379|6333|8000|5001|5002|5003)\b'
-   ```
+### Step 2: Add the Public Key to your OCI Server
+Log into your **OCI server** (`80.225.207.232`) and paste the contents of `/tmp/gha_oci_key.pub` into `~/.ssh/authorized_keys`:
+```bash
+cat << 'EOF' >> ~/.ssh/authorized_keys
+<PASTE_CONTENTS_OF_gha_oci_key.pub_HERE>
+EOF
 
-3. **Backend Network Exposure Options**:
-   The frontend calls `https://api.dbnodesfs.ssh.net.in`. Map that domain to port `4000`:
-   - **Option A (Zero-Firewall Cloudflare Tunnel — Recommended)**:
-     ```bash
-     docker run -d --name cf-tunnel --restart unless-stopped --network host \
-       cloudflare/cloudflared:latest tunnel run --token <YOUR_TUNNEL_TOKEN>
-     ```
-     Point `api.dbnodesfs.ssh.net.in` to `http://localhost:4000` in the Cloudflare Zero Trust dashboard.
-   - **Option B (Direct OCI Ingress / Reverse Proxy)**:
-     Open port `4000` in the OCI VCN Ingress Rules and iptables:
-     ```bash
-     sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 4000 -j ACCEPT
-     sudo netfilter-persistent save
-     ```
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+```
 
-### 2.2 Jenkins Server Preparation
-1. **SSH Key for OCI**:
-   Generate an SSH key on the Jenkins host if not already present:
-   ```bash
-   sudo -u jenkins ssh-keygen -t ed25519 -f /var/lib/jenkins/.ssh/id_ed25519_oci -N ""
-   sudo -u jenkins cat /var/lib/jenkins/.ssh/id_ed25519_oci.pub
-   ```
-   Add that public key to `/home/ubuntu/.ssh/authorized_keys` on OCI (`80.225.207.232`).
-   
-   Test from the Jenkins host:
-   ```bash
-   sudo -u jenkins ssh ubuntu@80.225.207.232 "docker ps"
-   ```
-
-2. **Jenkins Credentials**:
-   In Jenkins (`Manage Jenkins` -> `Credentials`):
-   - Add **SSH Username with private key**:
-     - ID: `oci-ssh-key`
-     - Username: `ubuntu`
-     - Private Key: content of `/var/lib/jenkins/.ssh/id_ed25519_oci`
+### Step 3: Add the Private Key to GitHub Secrets
+1. Go to your GitHub repository: **`https://github.com/Nithin0620/DBNodesFS`**
+2. Click **Settings** -> **Secrets and variables** -> **Actions**.
+3. Click **New repository secret**:
+   - **Name**: `OCI_SSH_KEY`
+   - **Secret**: Copy and paste the entire contents of `/tmp/gha_oci_key` (including `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----`).
+4. Click **Add secret**.
+*(You can now safely delete `/tmp/gha_oci_key` and `/tmp/gha_oci_key.pub` from your temporary folder).*
 
 ---
 
-## 3. Cloudflare Pages Configuration (GitHub Native)
+## 3. GitHub Actions Workflow Configuration
 
-In the Cloudflare dashboard:
-1. Go to **Workers & Pages** -> **Create application** -> **Pages** -> **Connect to Git**.
-2. Select repository: `Nithin0620/DBNodesFS`.
-3. Configure settings:
-   - **Framework preset**: `Vite`
-   - **Build command**: `pnpm --filter @dbnodesfs/shared build && pnpm --filter @dbnodesfs/web build`
-   - **Build output directory**: `apps/web/dist`
-   - **Root directory**: `/`
-4. In **Environment variables**:
-   - `NODE_VERSION`: `22`
-   - `VITE_API_URL`: `https://api.dbnodesfs.ssh.net.in`
-5. Click **Save and Deploy**. Cloudflare Pages will rebuild whenever you push to `main`.
+The workflow is stored in [.github/workflows/deploy.yml](file:///home/nithin/Projects/DBNodesFS/.github/workflows/deploy.yml):
 
----
+```yaml
+name: Deploy Backend to OCI
 
-## 4. Jenkins Pipeline (`Jenkinsfile`)
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-Since Cloudflare Pages handles the frontend natively, the `Jenkinsfile` only handles backend deployment to OCI:
-
-```groovy
-pipeline {
-    agent any
-
-    environment {
-        OCI_HOST = 'ubuntu@80.225.207.232'
-        DEPLOY_DIR = '/home/ubuntu/dbnodesfs'
-        REPO_URL = 'https://github.com/Nithin0620/DBNodesFS.git'
-    }
-
-    stages {
-        stage('Deploy Backend to OCI') {
-            steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'oci-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
-                    sh '''
-                        ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=no ${OCI_HOST} "
-                            set -e
-                            if [ ! -d ${DEPLOY_DIR} ]; then
-                                git clone ${REPO_URL} ${DEPLOY_DIR}
-                            fi
-                            cd ${DEPLOY_DIR}
-                            git fetch --all
-                            git reset --hard origin/main
-                            docker compose up -d --build --scale web=0 --remove-orphans
-                        "
-                    '''
-                }
-            }
-        }
-    }
-
-    post {
-        failure {
-            echo "❌ Backend deployment to OCI failed. Check logs above."
-        }
-        success {
-            echo "✅ Successfully deployed backend cluster to OCI! (Cloudflare Pages auto-deploys frontend independently)."
-        }
-    }
-}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH to OCI
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 80.225.207.232
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            set -e
+            if [ ! -d ~/dbnodesfs ]; then
+              git clone https://github.com/Nithin0620/DBNodesFS.git ~/dbnodesfs
+            fi
+            cd ~/dbnodesfs
+            git fetch --all
+            git reset --hard origin/main
+            docker compose up -d --build --scale web=0 --remove-orphans
 ```
 
 ---
 
-## 5. One-Command Teardown & Complete Wipe
+## 4. Cloudflare Pages Configuration (Frontend)
 
-To safely delete all DBNodesFS services, databases, vectors, and chunks without disturbing any other services or databases on the OCI server:
+In your Cloudflare Pages dashboard:
+- **Build command**: `pnpm --filter @dbnodesfs/shared build && pnpm --filter @dbnodesfs/web build`
+- **Build output directory**: `apps/web/dist`
+- **Root directory**: `/`
+- **Environment variables**:
+  - `NODE_VERSION`: `22`
+  - `VITE_API_URL`: `https://api.dbnodesfs.ssh.net.in`
 
-Run inside `/home/ubuntu/dbnodesfs` on OCI:
+---
+
+## 5. One-Command Teardown & Full Wipe
+
+To completely stop and wipe all DBNodesFS containers and data volumes from your OCI server at any time:
+
 ```bash
 docker compose down -v --remove-orphans
 ```
-*(Removes all DBNodesFS containers and persistent data volumes: `node1-data`, `node2-data`, `node3-data`, `mongo-data`, `redis-data`, `qdrant-data`).*
+*(Wipes MongoDB, Redis, Qdrant vectors, and chunk data from `node1-data`, `node2-data`, `node3-data` without impacting any other databases or services).*

@@ -1,0 +1,26 @@
+name: Deploy Backend to OCI
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH to OCI
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 80.225.207.232
+          username: ubuntu
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            set -e
+            if [ ! -d ~/dbnodesfs ]; then
+              git clone https://github.com/Nithin0620/DBNodesFS.git ~/dbnodesfs
+            fi
+            cd ~/dbnodesfs
+            git fetch --all
+            git reset --hard origin/main
+            docker compose up -d --build --scale web=0 --remove-orphans
