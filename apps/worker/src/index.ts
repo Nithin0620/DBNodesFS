@@ -19,7 +19,10 @@ const DENSE_DIM = 384;
 const TEXT_CHUNK_SIZE = 512;
 const TEXT_CHUNK_OVERLAP = 64;
 
-const qdrant = new QdrantClient({ url: QDRANT_URL });
+const qdrant = new QdrantClient({
+  url: QDRANT_URL,
+  ...(process.env.QDRANT_API_KEY ? { apiKey: process.env.QDRANT_API_KEY } : {}),
+});
 
 await mongoose.connect(process.env.MONGO_URI ?? "mongodb://localhost:27017/dbnodesfs");
 

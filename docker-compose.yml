@@ -1,11 +1,13 @@
 name: dbnodesfs
 
 x-app-env: &app-env
-  NODE_ENV: development
+  NODE_ENV: production
+  IS_DOCKER: "true"
   LOG_LEVEL: debug
-  MONGO_URI: mongodb://mongo:27017/dbnodesfs
-  REDIS_URL: redis://redis:6379
-  QDRANT_URL: http://qdrant:6333
+  MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/dbnodesfs}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+  QDRANT_API_KEY: ${QDRANT_API_KEY:-}
   EMBEDDER_URL: http://embedder:8000
   COORDINATOR_URL: http://coordinator:4000
 

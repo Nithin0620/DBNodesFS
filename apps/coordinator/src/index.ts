@@ -31,7 +31,10 @@ const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
 const gcQueue = new Queue(QUEUE_GC, { connection: redis });
 const indexQueue = new Queue(QUEUE_INDEX, { connection: redis });
 const repairQueue = new Queue(QUEUE_REPAIR, { connection: redis });
-const qdrant = new QdrantClient({ url: process.env.QDRANT_URL ?? "http://localhost:6333" });
+const qdrant = new QdrantClient({
+  url: process.env.QDRANT_URL ?? "http://localhost:6333",
+  ...(process.env.QDRANT_API_KEY ? { apiKey: process.env.QDRANT_API_KEY } : {}),
+});
 const EMBEDDER_URL = process.env.EMBEDDER_URL ?? "http://localhost:8000";
 const COLLECTION = "chunks";
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -461,6 +464,10 @@ app.use((_req, res) => {
 });
 
 function spawnNode(nodeId: string, port: number) {
+  if (process.env.NODE_ENV === "production" || process.env.IS_DOCKER) {
+    log.info({ nodeId, port }, "in container environment, skipping local process spawn");
+    return;
+  }
   const env = {
     ...process.env,
     STORAGE_NODE_ID: nodeId,
@@ -473,6 +480,10 @@ function spawnNode(nodeId: string, port: number) {
     ["--filter", "@dbnodesfs/storage-node", "dev"],
     { cwd: ROOT_DIR, env, stdio: "inherit", detached: false },
   );
+  child.on("error", (err) => {
+    log.warn({ nodeId, err: err.message }, "could not spawn storage node process");
+    spawnedNodes.delete(nodeId);
+  });
   child.on("exit", () => spawnedNodes.delete(nodeId));
   spawnedNodes.set(nodeId, child);
   log.info({ nodeId, port }, "spawned storage node");
