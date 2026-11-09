@@ -80,7 +80,6 @@ services:
 
   embedder:
     build: ./apps/embedder
-    ports: ["8000:8000"]
     environment:
       EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
       SPARSE_MODEL: Qdrant/bm25
