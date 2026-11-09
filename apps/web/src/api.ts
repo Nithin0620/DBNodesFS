@@ -28,6 +28,10 @@ export interface Citation {
   chunkIndex: number;
 }
 
+export const API_BASE = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL.replace(/\/+$/, "")
+  : "/api";
+
 export async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["content-type"] = "application/json";
@@ -36,7 +40,7 @@ export async function api<T>(path: string, method = "GET", body?: unknown): Prom
 
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
-  const res = await fetch(`/api${path}`, init);
+  const res = await fetch(`${API_BASE}${path}`, init);
 
   const payload = await res.json().catch(() => null);
   if (!res.ok) {
@@ -61,7 +65,7 @@ export async function rawUpload(file: File, workspaceId: string): Promise<FileRe
     workspaceId,
   });
 
-  const res = await fetch(`/api/files?${params}`, {
+  const res = await fetch(`${API_BASE}/files?${params}`, {
     method: "POST",
     headers,
     body: file,

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { FallingLeaves } from "falling-leaves/react";
 import Admin from "./Admin";
-import { api, listFiles, rawUpload, type Citation, type FileRecord, type Health, type SearchHit } from "./api";
+import { api, API_BASE, listFiles, rawUpload, type Citation, type FileRecord, type Health, type SearchHit } from "./api";
 
 type Tab = "dashboard" | "files" | "search" | "admin";
 
@@ -316,7 +316,7 @@ function FilesTab({ workspaceId, setWorkspaceId }: { workspaceId: string; setWor
     const token = localStorage.getItem("token");
     const headers: Record<string, string> = {};
     if (token) headers.authorization = `Bearer ${token}`;
-    const res = await fetch(`/api/files/${file._id}/download`, { headers });
+    const res = await fetch(`${API_BASE}/files/${file._id}/download`, { headers });
     if (!res.ok) { setStatus(`download failed: ${res.statusText}`); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

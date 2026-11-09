@@ -40,6 +40,15 @@ import type { ChildProcess } from "node:child_process";
 const spawnedNodes = new Map<string, ChildProcess>();
 
 app.use(createHttpLogger(log));
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
 app.use(express.json({ limit: "1mb" }));
 
 const API_TOKEN = process.env.API_TOKEN ?? "";
