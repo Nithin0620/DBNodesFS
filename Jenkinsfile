@@ -10,9 +10,9 @@ pipeline {
     stages {
         stage('Deploy Backend to OCI') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'oci-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
+                withCredentials([sshUserPrivateKey(credentialsId: 'oci-ssh-key', keyFileVariable: 'SSH_KEY')]) {
                     sh '''
-                        ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=no ${OCI_HOST} "
+                        ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no ${OCI_HOST} "
                             set -e
                             if [ ! -d ${DEPLOY_DIR} ]; then
                                 git clone ${REPO_URL} ${DEPLOY_DIR}
@@ -29,11 +29,11 @@ pipeline {
     }
 
     post {
-        failure {
-            echo "❌ Backend deployment to OCI failed. Check logs above."
-        }
         success {
-            echo "✅ Successfully deployed backend cluster to OCI! (Cloudflare Pages auto-deploys frontend independently)."
+            echo "✅ Jenkins Pipeline succeeded! Backend cluster deployed to OCI."
+        }
+        failure {
+            echo "❌ Jenkins Pipeline failed."
         }
     }
 }
