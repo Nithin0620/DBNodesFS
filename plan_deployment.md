@@ -137,9 +137,9 @@ pipeline {
     stages {
         stage('Deploy Backend to OCI') {
             steps {
-                sshagent(['oci-ssh-key']) {
+                withCredentials([sshUserPrivateKey(credentialsId: 'oci-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
                     sh '''
-                        ssh -o StrictHostKeyChecking=no ${OCI_HOST} "
+                        ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=no ${OCI_HOST} "
                             set -e
                             if [ ! -d ${DEPLOY_DIR} ]; then
                                 git clone ${REPO_URL} ${DEPLOY_DIR}
